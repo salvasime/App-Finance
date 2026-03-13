@@ -2,23 +2,30 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-import calendar
 
-# --- CONFIGURAZIONE PAGINA ---
+# --- CONFIGURAZIONE INTERFACCIA ---
 st.set_page_config(page_title="Finance Manager Pro", layout="wide", initial_sidebar_state="expanded")
 
-# --- STRUTTURA DATI (Categorie e Sottocategorie) ---
+# --- STILE CSS PERSONALIZZATO ---
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- CATEGORIE NORMALIZZATE (Tutte Maiuscole) ---
 CATEGORIES = {
     "Uscite": {
-        "Allianz": ["Fondo pensione", "malattia", "caso morte"],
-        "Casa": ["Arredamento", "assicurazione", "Condominio", "Dazn", "Sky", "Energia", "Internet", "Manutenzione", "Mutuo", "Pulizia", "Fondo Casa", "Tari", "Altro"],
-        "Food": ["Aperitivo", "caffè", "cena", "varie", "colazione", "pranzo", "prozis", "spesa"],
-        "Aurora": ["visite", "farmacia", "accessori", "cibo", "Asilo", "Baby Sitter", "Accumulo Aurora", "Altro"],
-        "Macchina e Trasporti": ["RCA", "Benzina", "Bollo", "Fondo Macchina", "Lavaggio", "Manutenzione", "Parcheggio", "Pneumatici", "Tagliando", "Telepass", "Trasporti città", "Treno", "Altro"],
-        "Regali e Offerte": ["Regali eventi", "regali amici/colleghi", "regali famiglia", "regali laura", "Offerte amici/colleghi", "offerte laura", "offerte varie"],
-        "Salute e Benessere": ["Farmacia", "Parrucchiere", "Visite Mediche", "extra"],
-        "Tempo Libero": ["Shopping", "Eventi", "Palestra", "Altri sport", "Mare/Piscina", "Spa", "Vacanze", "Altro"],
-        "Varie": ["Adozione/Beneficienza", "Multe/Tributi", "spese conto corrente", "fantacalcio", "Elettronica accessori", "Dispositivi", "Ricarica telefonica", "bet", "uscite varie"]
+        "Allianz": ["Fondo Pensione", "Malattia", "Caso Morte"],
+        "Casa": ["Arredamento", "Assicurazione", "Condominio", "Dazn", "Sky", "Energia", "Internet", "Manutenzione", "Mutuo", "Pulizia", "Fondo Casa", "Tari", "Altro"],
+        "Food": ["Aperitivo", "Caffè", "Cena", "Varie", "Colazione", "Pranzo", "Prozis", "Spesa"],
+        "Aurora": ["Visite", "Farmacia", "Accessori", "Cibo", "Asilo", "Baby Sitter", "Accumulo Aurora", "Altro"],
+        "Macchina e Trasporti": ["RCA", "Benzina", "Bollo", "Fondo Macchina", "Lavaggio", "Manutenzione", "Parcheggio", "Pneumatici", "Tagliando", "Telepass", "Trasporti Città", "Treno", "Altro"],
+        "Regali e Offerte": ["Regali Eventi", "Regali Amici/Colleghi", "Regali Famiglia", "Regali Laura", "Offerte Amici/Colleghi", "Offerte Laura", "Offerte Varie"],
+        "Salute e Benessere": ["Farmacia", "Parrucchiere", "Visite Mediche", "Extra"],
+        "Tempo Libero": ["Shopping", "Eventi", "Palestra", "Altri Sport", "Mare/Piscina", "Spa", "Vacanze", "Altro"],
+        "Varie": ["Adozione/Beneficienza", "Multe/Tributi", "Spese Conto Corrente", "Fantacalcio", "Elettronica Accessori", "Dispositivi", "Ricarica Telefonica", "Bet", "Uscite Varie"]
     },
     "Entrate": {
         "Lavoro": ["Stipendio", "Bonus", "Premio"],
@@ -26,122 +33,109 @@ CATEGORIES = {
     }
 }
 
-# Sottocategorie che devono alimentare un fondo di accumulo
 ACCUMULO_SUBS = [
-    "Fondo pensione", "Arredamento", "Condominio", "Dazn", "Energia", "Manutenzione", 
-    "Fondo casa", "Baby sitter/Asilo", "Accumulo Aurora", "RCA", "Bollo", 
-    "Fondo Macchina", "Pneumatici", "Tagliando", "Telepass", "Regali eventi", 
-    "Regali laura", "Shopping", "Vacanze", "Adozione/Beneficienza", "Fantacalcio", "Dispositivi"
+    "Fondo Pensione", "Arredamento", "Condominio", "Dazn", "Energia", "Manutenzione", 
+    "Fondo Casa", "Baby Sitter/Asilo", "Accumulo Aurora", "RCA", "Bollo", 
+    "Fondo Macchina", "Pneumatici", "Tagliando", "Telepass", "Regali Eventi", 
+    "Regali Laura", "Shopping", "Vacanze", "Adozione/Beneficienza", "Fantacalcio", "Dispositivi"
 ]
 
-# --- INIZIALIZZAZIONE STATO ---
+# --- INIZIALIZZAZIONE ---
 if 'db' not in st.session_state:
-    st.session_state.db = pd.DataFrame(columns=["Data", "Mese", "Tipo", "Macro", "Sub", "Descrizione", "Metodo", "Importo", "Accumulo", "Controparte"])
+    st.session_state.db = pd.DataFrame(columns=["Data", "Mese_Num", "Tipo", "Macro", "Sub", "Descrizione", "Metodo", "Importo", "Accumulo", "Controparte"])
 
 if 'saldi_iniziali' not in st.session_state:
-    st.session_state.saldi_iniziali = {
-        "BNL": 0.0, "BPM": 0.0, "Buoni Pasto": 0.0, "Contanti": 0.0, 
-        "Conto gioco": 0.0, "Illimity": 0.0, "Paypal": 0.0, "Revolut": 0.0, "Satispay": 0.0
-    }
+    st.session_state.saldi_iniziali = {m: 0.0 for m in ["BNL", "BPM", "Buoni Pasto", "Contanti", "Conto Gioco", "Illimity", "Paypal", "Revolut", "Satispay"]}
 
-# --- FUNZIONI DI CALCOLO ---
-def get_saldo_attuale(metodo):
-    iniziale = st.session_state.saldi_iniziali.get(metodo, 0.0)
+# --- LOGICA SALDI ---
+def calcola_saldi():
     df = st.session_state.db
-    entrate = df[(df["Metodo"] == metodo) & (df["Tipo"] == "Entrate")]["Importo"].sum()
-    uscite = df[(df["Metodo"] == metodo) & (df["Tipo"] == "Uscite")]["Importo"].sum()
-    # Giroconti: se metodo è origine (Uscita) o destinazione (Entrata)
-    giro_uscita = df[(df["Metodo"] == metodo) & (df["Tipo"] == "Giroconto")]["Importo"].sum()
-    giro_entrata = df[(df["Controparte"] == metodo) & (df["Tipo"] == "Giroconto")]["Importo"].sum()
-    return iniziale + entrate + giro_entrata - uscite - giro_uscita
+    saldi_finali = st.session_state.saldi_iniziali.copy()
+    for m in saldi_finali:
+        e = df[(df["Metodo"] == m) & (df["Tipo"] == "Entrate")]["Importo"].sum()
+        u = df[(df["Metodo"] == m) & (df["Tipo"] == "Uscite")]["Importo"].sum()
+        g_u = df[(df["Metodo"] == m) & (df["Tipo"] == "Giroconto")]["Importo"].sum()
+        g_e = df[(df["Controparte"] == m) & (df["Tipo"] == "Giroconto")]["Importo"].sum()
+        saldi_finali[m] += (e + g_e - u - g_u)
+    return saldi_finali
 
-# --- SIDEBAR: INSERIMENTO OPERAZIONI ---
-st.sidebar.header("➕ Nuova Operazione")
-with st.sidebar.form("form_op", clear_on_submit=True):
-    f_tipo = st.selectbox("Tipo Operazione", ["Uscite", "Entrate", "Giroconto", "Anticipo", "Rimborso"])
-    f_data = st.date_input("Data", datetime.now())
+# --- SIDEBAR ---
+st.sidebar.title("💳 Menu Operazioni")
+with st.sidebar.form("input_form", clear_on_submit=True):
+    tipo = st.selectbox("Tipo", ["Uscite", "Entrate", "Giroconto", "Anticipo", "Rimborso"])
+    data = st.date_input("Data", datetime.now())
     
-    # Logica Dinamica Categorie
-    if f_tipo == "Giroconto":
-        f_macro, f_sub = "Trasferimento", "Giroconto"
-        f_metodo = st.selectbox("Da (Origine)", list(st.session_state.saldi_iniziali.keys()))
-        f_controparte = st.selectbox("A (Destinazione)", list(st.session_state.saldi_iniziali.keys()))
+    if tipo == "Giroconto":
+        macro, sub = "Trasferimento", "Giroconto"
+        metodo = st.selectbox("Da (Origine)", list(st.session_state.saldi_iniziali.keys()))
+        controparte = st.selectbox("A (Destinazione)", list(st.session_state.saldi_iniziali.keys()))
     else:
-        tipo_cat = "Entrate" if f_tipo in ["Entrate", "Rimborso"] else "Uscite"
-        f_macro = st.selectbox("Macro-categoria", list(CATEGORIES[tipo_cat].keys()))
-        f_sub = st.selectbox("Sotto-categoria", CATEGORIES[tipo_cat][f_macro])
-        f_metodo = st.selectbox("Metodo di Pagamento", list(st.session_state.saldi_iniziali.keys()))
-        f_controparte = None
+        tipo_cat = "Entrate" if tipo in ["Entrate", "Rimborso"] else "Uscite"
+        macro = st.selectbox("Macro-categoria", list(CATEGORIES[tipo_cat].keys()))
+        sub = st.selectbox("Sotto-categoria", CATEGORIES[tipo_cat][macro])
+        metodo = st.selectbox("Metodo di Pagamento", list(st.session_state.saldi_iniziali.keys()))
+        controparte = None
 
-    f_importo = st.number_input("Importo (€)", min_value=0.0, step=0.01, format="%.2f")
-    f_desc = st.text_input("Descrizione / Note")
+    importo = st.number_input("Importo (€)", min_value=0.0, step=0.01)
+    desc = st.text_input("Descrizione")
     
-    if st.form_submit_button("Registra"):
-        is_acc = "Sì" if f_sub in ACCUMULO_SUBS else "No"
-        nuova_riga = {
-            "Data": pd.to_datetime(f_data), "Mese": f_data.month, "Tipo": f_tipo, 
-            "Macro": f_macro, "Sub": f_sub, "Descrizione": f_desc, 
-            "Metodo": f_metodo, "Importo": f_importo, "Accumulo": is_acc, "Controparte": f_controparte
-        }
-        st.session_state.db = pd.concat([st.session_state.db, pd.DataFrame([nuova_riga])], ignore_index=True)
-        st.sidebar.success("Operazione salvata!")
+    if st.form_submit_button("CONFERMA OPERAZIONE"):
+        is_acc = "Sì" if sub in ACCUMULO_SUBS else "No"
+        row = {"Data": pd.to_datetime(data), "Mese_Num": data.month, "Tipo": tipo, "Macro": macro, "Sub": sub, 
+               "Descrizione": desc, "Metodo": metodo, "Importo": importo, "Accumulo": is_acc, "Controparte": controparte}
+        st.session_state.db = pd.concat([st.session_state.db, pd.DataFrame([row])], ignore_index=True)
+        st.rerun()
 
-# --- LAYOUT PRINCIPALE: TABS ---
-mesi_nomi = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", 
-             "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre", "ANNUALE", "SETTAGGI"]
-tabs = st.tabs(mesi_nomi)
+# --- MAIN TABS ---
+mesi = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre", "ANNUALE", "CONFIG"]
+tabs = st.tabs(mesi)
 
-for i, nome_tab in enumerate(mesi_nomi):
+saldi_attuali = calcola_saldi()
+
+for i, nome_mese in enumerate(mesi):
     with tabs[i]:
-        if nome_tab == "SETTAGGI":
-            st.header("⚙️ Configurazione Iniziale")
-            col_s1, col_s2 = st.columns(2)
-            with col_s1:
-                st.subheader("Saldi al 1° Gennaio")
-                for m in st.session_state.saldi_iniziali:
-                    st.session_state.saldi_iniziali[m] = st.number_input(f"Saldo {m}", value=st.session_state.saldi_iniziali[m], key=f"init_{m}")
-            
-        elif nome_tab == "ANNUALE":
-            st.header("📊 Analisi Annuale")
-            df_annuo = st.session_state.db
-            if not df_annuo.empty:
-                c1, c2 = st.columns([2, 1])
-                with c1:
-                    fig = px.bar(df_annuo[df_annuo["Tipo"].isin(["Uscite", "Entrate"])], 
-                                 x="Mese", y="Importo", color="Tipo", barmode="group", title="Entrate vs Uscite")
-                    st.plotly_chart(fig, use_container_width=True)
-                with c2:
-                    st.subheader("Stato Fondi Accumulo")
-                    acc_df = df_annuo[df_annuo["Accumulo"] == "Sì"].groupby("Sub")["Importo"].sum().reset_index()
-                    st.table(acc_df)
-            else: st.info("Nessun dato registrato.")
+        if nome_mese == "CONFIG":
+            st.header("⚙️ Impostazioni Saldi Iniziali")
+            cols = st.columns(3)
+            for idx, m in enumerate(st.session_state.saldi_iniziali):
+                st.session_state.saldi_iniziali[m] = cols[idx%3].number_input(f"Saldo Iniziale {m}", value=st.session_state.saldi_iniziali[m])
+
+        elif nome_mese == "ANNUALE":
+            st.header("📊 Dashboard Annuale")
+            df_a = st.session_state.db
+            if not df_a.empty:
+                c1, c2 = st.columns(2)
+                fig_bar = px.bar(df_a[df_a["Tipo"].isin(["Uscite", "Entrate"])], x="Mese_Num", y="Importo", color="Tipo", title="Trend Mensile", barmode="group")
+                c1.plotly_chart(fig_bar, use_container_width=True)
+                
+                acc_total = df_a[df_a["Accumulo"] == "Sì"].groupby("Sub")["Importo"].sum().reset_index()
+                c2.subheader("💰 Fondi Accumulo Totali")
+                c2.dataframe(acc_total, use_container_width=True)
+            else: st.info("Inserisci dati per vedere i grafici.")
 
         else:
-            # DASHBOARD MENSILE (1-12)
-            st.header(f"Riepilogo {nome_tab}")
+            # TAB MENSILE
+            st.header(f"📅 Resoconto {nome_mese}")
             
-            # Row 1: Saldi Metodi Pagamento
-            st.subheader("🏦 I tuoi conti (Saldo Attuale)")
-            cols_m = st.columns(len(st.session_state.saldi_iniziali))
-            for idx, m in enumerate(st.session_state.saldi_iniziali.keys()):
-                saldo = get_saldo_attuale(m)
-                cols_m[idx % 9].metric(m, f"{saldo:.2f} €")
+            # Metriche Conti
+            cols_m = st.columns(len(saldi_attuali))
+            for idx, m in enumerate(saldi_attuali):
+                cols_m[idx].metric(m, f"{saldi_attuali[m]:.2f}€")
             
             st.divider()
             
-            # Row 2: Dati del mese
-            df_m = st.session_state.db[st.session_state.db["Mese"] == (i + 1)]
-            col_sx, col_dx = st.columns([2, 1])
+            df_m = st.session_state.db[st.session_state.db["Mese_Num"] == (i + 1)]
             
-            with col_sx:
-                st.subheader("Movimenti Dettagliati")
-                st.dataframe(df_m.drop(columns=["Mese"]), use_container_width=True)
-            
-            with col_dx:
-                st.subheader("Analisi Spese")
-                df_u = df_m[df_m["Tipo"] == "Uscite"]
-                if not df_u.empty:
-                    fig_pie = px.pie(df_u, values='Importo', names='Macro', hole=0.4)
-                    st.plotly_chart(fig_pie, use_container_width=True)
-                else:
-                    st.write("Nessuna uscita questo mese.")
+            if not df_m.empty:
+                col_tab, col_graph = st.columns([1.5, 1])
+                with col_tab:
+                    st.subheader("Lista Movimenti")
+                    st.dataframe(df_m[["Data", "Tipo", "Macro", "Sub", "Importo", "Metodo", "Descrizione"]], use_container_width=True)
+                
+                with col_graph:
+                    st.subheader("Ripartizione Spese")
+                    df_u = df_m[df_m["Tipo"] == "Uscite"]
+                    if not df_u.empty:
+                        fig_pie = px.pie(df_u, values='Importo', names='Macro', hole=0.5, color_discrete_sequence=px.colors.sequential.RdBu)
+                        st.plotly_chart(fig_pie, use_container_width=True)
+            else: st.info("Nessun movimento registrato per questo mese.")
