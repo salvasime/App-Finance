@@ -4,28 +4,25 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime
 
-# --- CONFIGURAZIONE E STILE ---
-st.set_page_config(page_title="Personal Finance Pro", layout="wide")
+# --- CONFIGURAZIONE PAGINA ---
+st.set_page_config(page_title="Finance Manager Pro", layout="wide", initial_sidebar_state="expanded")
 
-# CSS per rendere l'interfaccia più "App-like"
+# --- STILE UX ---
 st.markdown("""
     <style>
-    .stMetric { border-radius: 15px; padding: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { 
-        background-color: #f0f2f6; border-radius: 10px 10px 0 0; padding: 10px 20px;
-    }
-    .stTabs [aria-selected="true"] { background-color: #007bff !important; color: white !important; }
+    .stMetric { border: 1px solid #464b5d; padding: 10px; border-radius: 10px; }
+    .stDataFrame { border: 1px solid #464b5d; border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- CONNESSIONE GOOGLE SHEETS ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def load_data(worksheet):
-    return conn.read(worksheet=worksheet, ttl="0s")
+def load_data(sheet_name):
+    # Carica i dati senza cache (ttl=0) per vedere subito le modifiche
+    return conn.read(worksheet=sheet_name, ttl="0s")
 
-# --- DEFINIZIONE CATEGORIE E ACCUMULI ---
+# --- DEFINIZIONE CATEGORIE ---
 CATEGORIES = {
     "Uscite": {
         "Allianz": ["Fondo Pensione", "Malattia", "Caso Morte"],
@@ -44,6 +41,7 @@ CATEGORIES = {
     }
 }
 
+# Sottocategorie dedicate all'accumulo
 ACCUMULO_LIST = [
     "Fondo Pensione", "Arredamento", "Condominio", "Dazn", "Energia", "Manutenzione", 
     "Fondo Casa", "Baby Sitter/Asilo", "Accumulo Aurora", "RCA", "Bollo", 
@@ -52,19 +50,17 @@ ACCUMULO_LIST = [
 ]
 
 # --- SIDEBAR: REGISTRAZIONE ---
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/10006/10006326.png", width=80)
-st.sidebar.header("Nuova Operazione")
-
+st.sidebar.title("💳 Operazioni")
 with st.sidebar.form("form_inserimento", clear_on_submit=True):
     tipo = st.selectbox("Tipo", ["Uscite", "Entrate", "Giroconto", "Anticipo", "Rimborso"])
     data = st.date_input("Data", datetime.now())
     
-    # Caricamento metodi dinamico
+    # Caricamento dinamico metodi da Google Sheets
     try:
         df_s = load_data("Saldi")
-        metodi = df_s["Metodo"].tolist()
+        metodi = df_s["Metodo"].unique().tolist()
     except:
-        metodi = ["BNL", "BPM", "Contanti", "Revolut"]
+        metodi = ["Configura in Tab CONFIG"]
 
     if tipo == "Giroconto":
         macro, sub = "Trasferimento", "Giroconto"
@@ -74,13 +70,13 @@ with st.sidebar.form("form_inserimento", clear_on_submit=True):
         tipo_cat = "Entrate" if tipo in ["Entrate", "Rimborso"] else "Uscite"
         macro = st.selectbox("Macro-categoria", list(CATEGORIES[tipo_cat].keys()))
         sub = st.selectbox("Sotto-categoria", CATEGORIES[tipo_cat][macro])
-        m_da = st.selectbox("Metodo di Pagamento", metodi)
+        m_da = st.selectbox("Metodo", metodi)
         m_a = ""
 
     importo = st.number_input("Importo (€)", min_value=0.0, format="%.2f")
-    desc = st.text_input("Nota/Descrizione")
+    desc = st.text_input("Descrizione")
     
-    if st.form_submit_button("REGISTRA"):
+    if st.form_submit_button("REGISTRA MOVIMENTO"):
         df_t = load_data("Transazioni")
         is_acc = "Sì" if sub in ACCUMULO_LIST else "No"
         new_row = pd.DataFrame([{"Data": str(data), "Mese_Num": int(data.month), "Tipo": tipo, "Macro": macro, "Sub": sub, 
@@ -93,60 +89,84 @@ with st.sidebar.form("form_inserimento", clear_on_submit=True):
 mesi = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre", "ANNUALE", "CONFIG"]
 tabs = st.tabs(mesi)
 
-# Caricamento dati una sola volta per tutte le tab
+# Caricamento Database
 df_all = load_data("Transazioni")
-df_saldi = load_data("Saldi")
+df_saldi_init = load_data("Saldi")
 
 for i, nome_mese in enumerate(mesi):
     with tabs[i]:
         if nome_mese == "CONFIG":
-            st.header("⚙️ Configurazione Metodi")
-            ed = st.data_editor(df_saldi, num_rows="dynamic", use_container_width=True)
-            if st.button("Salva Conti"):
+            st.header("⚙️ Configurazione Metodi e Saldi Iniziali")
+            st.info("Aggiungi qui i tuoi conti e il saldo che avevano al 1° Gennaio.")
+            ed = st.data_editor(df_saldi_init, num_rows="dynamic", use_container_width=True)
+            if st.button("Salva Configurazione"):
                 conn.update(worksheet="Saldi", data=ed)
+                st.success("Conti aggiornati!")
                 st.rerun()
 
         elif nome_mese == "ANNUALE":
-            st.header("📊 Dashboard Annuale")
+            st.header("📊 Analisi Annuale e Accumuli")
             if not df_all.empty:
                 col1, col2 = st.columns([2, 1])
                 with col1:
-                    fig = px.bar(df_all[df_all["Tipo"].isin(["Uscite", "Entrate"])], 
-                                 x="Mese_Num", y="Importo", color="Tipo", barmode="group",
-                                 title="Andamento Entrate/Uscite", color_discrete_map={"Uscite":"#e74c3c","Entrate":"#2ecc71"})
+                    # Grafico Entrate/Uscite
+                    df_filtered = df_all[df_all["Tipo"].isin(["Uscite", "Entrate"])]
+                    fig = px.bar(df_filtered, x="Mese_Num", y="Importo", color="Tipo", barmode="group",
+                                 title="Trend Mensile", color_discrete_map={"Uscite":"#EF553B","Entrate":"#00CC96"})
                     st.plotly_chart(fig, use_container_width=True)
+                
                 with col2:
-                    st.subheader("💰 Fondi Accumulo")
-                    # Qui sommiamo tutte le sottocategorie marcate come "Accumulo"
-                    acc_summary = df_all[df_all["Accumulo"] == "Sì"].groupby("Sub")["Importo"].sum().reset_index()
-                    st.dataframe(acc_summary, use_container_width=True, hide_index=True)
+                    # RIEPILOGO ACCUMULI
+                    st.subheader("💰 Fondi di Accumulo")
+                    st.write("Somma totale accantonata per sottocategoria:")
+                    df_acc = df_all[df_all["Accumulo"] == "Sì"].groupby("Sub")["Importo"].sum().reset_index()
+                    st.dataframe(df_acc, use_container_width=True, hide_index=True)
+            else:
+                st.info("Nessun dato disponibile per l'analisi annuale.")
 
         else:
-            # DASHBOARD MENSILE
-            st.header(f"📅 Situazione {nome_mese}")
+            # DASHBOARD MENSILE (Gen-Dic)
+            st.header(f"📅 Situazione di {nome_mese}")
             
-            # Calcolo Saldi Attuali per il mese (UX: Mattonelle dinamiche)
-            st.subheader("🏦 Saldi Strumenti")
-            m_cols = st.columns(len(df_saldi))
-            for idx, row in df_saldi.iterrows():
+            # Calcolo Saldi Metodi (Saldo Iniziale + Entrate - Uscite)
+            st.subheader("🏦 Saldo Attuale Conti")
+            m_cols = st.columns(len(df_saldi_init))
+            for idx, row in df_saldi_init.iterrows():
                 m_nome = row["Metodo"]
-                # Calcolo semplificato per UX
+                s_init = row["Saldo_Iniziale"]
+                
+                # Calcolo entrate e uscite totali su quel metodo da inizio anno
                 ent = df_all[(df_all["Metodo"] == m_nome) & (df_all["Tipo"] == "Entrate")]["Importo"].sum()
+                rim = df_all[(df_all["Metodo"] == m_nome) & (df_all["Tipo"] == "Rimborso")]["Importo"].sum()
                 usc = df_all[(df_all["Metodo"] == m_nome) & (df_all["Tipo"] == "Uscite")]["Importo"].sum()
-                bal = row["Saldo_Iniziale"] + ent - usc
-                m_cols[idx % 4].metric(m_nome, f"{bal:.2f} €")
+                ant = df_all[(df_all["Metodo"] == m_nome) & (df_all["Tipo"] == "Anticipo")]["Importo"].sum()
+                
+                # Giroconti
+                g_usc = df_all[(df_all["Metodo"] == m_nome) & (df_all["Tipo"] == "Giroconto")]["Importo"].sum()
+                g_ent = df_all[(df_all["Controparte"] == m_nome) & (df_all["Tipo"] == "Giroconto")]["Importo"].sum()
+                
+                saldo_attuale = s_init + ent + rim + g_ent - usc - ant - g_usc
+                m_cols[idx % 4].metric(m_nome, f"{saldo_attuale:.2f} €")
 
             st.divider()
 
+            # Filtro dati del mese
             df_m = df_all[df_all["Mese_Num"].astype(int) == (i + 1)]
+            
             if not df_m.empty:
                 c1, c2 = st.columns([1.5, 1])
                 with c1:
-                    st.subheader("Movimenti")
-                    st.dataframe(df_m[["Data", "Tipo", "Macro", "Sub", "Importo", "Metodo"]], use_container_width=True, hide_index=True)
+                    st.subheader("Dettaglio Movimenti")
+                    st.dataframe(df_m[["Data", "Tipo", "Macro", "Sub", "Importo", "Metodo", "Descrizione"]], 
+                                 use_container_width=True, hide_index=True)
                 with c2:
-                    st.subheader("Spese per Categoria")
-                    fig_p = px.pie(df_m[df_m["Tipo"] == "Uscite"], values='Importo', names='Macro', hole=0.5)
-                    st.plotly_chart(fig_p, use_container_width=True)
+                    st.subheader("Distribuzione Spese")
+                    df_u = df_m[df_m["Tipo"] == "Uscite"]
+                    if not df_u.empty:
+                        fig_p = px.pie(df_u, values='Importo', names='Macro', hole=0.5, 
+                                       color_discrete_sequence=px.colors.qualitative.Safe)
+                        st.plotly_chart(fig_p, use_container_width=True)
+                    else:
+                        st.write("Nessuna uscita registrata.")
             else:
-                st.info(f"Nessuna operazione registrata a {nome_mese}")
+                st.info(f"Non ci sono ancora movimenti registrati per {nome_mese}.")
