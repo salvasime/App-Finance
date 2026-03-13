@@ -6,15 +6,7 @@ from datetime import datetime
 # --- CONFIGURAZIONE INTERFACCIA ---
 st.set_page_config(page_title="Finance Manager Pro", layout="wide", initial_sidebar_state="expanded")
 
-# --- STILE CSS PER UX PROFESSIONALE ---
-st.markdown("""
-    <style>
-    .stMetric { background-color: #ffffff; padding: 10px; border-radius: 10px; border: 1px solid #e0e0e0; }
-    [data-testid="stSidebar"] { background-color: #f1f3f6; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- CATEGORIE NORMALIZZATE ---
+# --- CATEGORIE E SOTTOCATEGORIE (Standardizzate) ---
 CATEGORIES = {
     "Uscite": {
         "Allianz": ["Fondo Pensione", "Malattia", "Caso Morte"],
@@ -43,32 +35,29 @@ ACCUMULO_SUBS = [
 COLONNE = ["Data", "Mese_Num", "Tipo", "Macro", "Sub", "Descrizione", "Metodo", "Importo", "Accumulo", "Controparte"]
 
 # --- INIZIALIZZAZIONE ---
-if 'db' not in st.session_state or st.session_state.db is None:
-    st.session_state.db = pd.DataFrame(columns=COLONNE)
-elif not all(c in st.session_state.db.columns for c in COLONNE):
-    # Forza il reset se mancano colonne
+if 'db' not in st.session_state or not isinstance(st.session_state.db, pd.DataFrame):
     st.session_state.db = pd.DataFrame(columns=COLONNE)
 
 if 'saldi_iniziali' not in st.session_state:
     st.session_state.saldi_iniziali = {m: 0.0 for m in ["BNL", "BPM", "Buoni Pasto", "Contanti", "Conto Gioco", "Illimity", "Paypal", "Revolut", "Satispay"]}
 
-# --- LOGICA SALDI ---
+# --- LOGICA CALCOLI ---
 def calcola_saldi():
     df = st.session_state.db
-    saldi_finali = st.session_state.saldi_iniziali.copy()
+    saldi = st.session_state.saldi_iniziali.copy()
     if not df.empty:
-        for m in saldi_finali:
-            e = df[(df["Metodo"] == m) & (df["Tipo"] == "Entrate")]["Importo"].sum()
-            u = df[(df["Metodo"] == m) & (df["Tipo"] == "Uscite")]["Importo"].sum()
-            a = df[(df["Metodo"] == m) & (df["Tipo"] == "Anticipo")]["Importo"].sum()
-            r = df[(df["Metodo"] == m) & (df["Tipo"] == "Rimborso")]["Importo"].sum()
+        for m in saldi:
+            ent = df[(df["Metodo"] == m) & (df["Tipo"] == "Entrate")]["Importo"].sum()
+            rim = df[(df["Metodo"] == m) & (df["Tipo"] == "Rimborso")]["Importo"].sum()
+            usc = df[(df["Metodo"] == m) & (df["Tipo"] == "Uscite")]["Importo"].sum()
+            ant = df[(df["Metodo"] == m) & (df["Tipo"] == "Anticipo")]["Importo"].sum()
             g_u = df[(df["Metodo"] == m) & (df["Tipo"] == "Giroconto")]["Importo"].sum()
             g_e = df[(df["Controparte"] == m) & (df["Tipo"] == "Giroconto")]["Importo"].sum()
-            saldi_finali[m] += (e + r + g_e - u - a - g_u)
-    return saldi_finali
+            saldi[m] += (ent + rim + g_e - usc - ant - g_u)
+    return saldi
 
 # --- SIDEBAR ---
-st.sidebar.title("💰 Finance Pro")
+st.sidebar.title("💰 Inserimento Dati")
 with st.sidebar.form("input_form", clear_on_submit=True):
     tipo = st.selectbox("Tipo", ["Uscite", "Entrate", "Giroconto", "Anticipo", "Rimborso"])
     data = st.date_input("Data", datetime.now())
@@ -81,71 +70,70 @@ with st.sidebar.form("input_form", clear_on_submit=True):
         tipo_cat = "Entrate" if tipo in ["Entrate", "Rimborso"] else "Uscite"
         macro = st.selectbox("Macro-categoria", list(CATEGORIES[tipo_cat].keys()))
         sub = st.selectbox("Sotto-categoria", CATEGORIES[tipo_cat][macro])
-        metodo = st.selectbox("Metodo di Pagamento", list(st.session_state.saldi_iniziali.keys()))
+        metodo = st.selectbox("Metodo", list(st.session_state.saldi_iniziali.keys()))
         controparte = None
 
     importo = st.number_input("Importo (€)", min_value=0.0, step=0.01)
     desc = st.text_input("Descrizione")
     
-    if st.form_submit_button("REGISTRA MOVIMENTO"):
+    if st.form_submit_button("REGISTRA"):
         is_acc = "Sì" if sub in ACCUMULO_SUBS else "No"
-        row = pd.DataFrame([{"Data": pd.to_datetime(data), "Mese_Num": int(data.month), "Tipo": tipo, "Macro": macro, "Sub": sub, 
-                             "Descrizione": desc, "Metodo": metodo, "Importo": importo, "Accumulo": is_acc, "Controparte": controparte}])
-        st.session_state.db = pd.concat([st.session_state.db, row], ignore_index=True)
+        new_row = pd.DataFrame([{"Data": pd.to_datetime(data), "Mese_Num": data.month, "Tipo": tipo, "Macro": macro, "Sub": sub, 
+                                 "Descrizione": desc, "Metodo": metodo, "Importo": importo, "Accumulo": is_acc, "Controparte": controparte}])
+        st.session_state.db = pd.concat([st.session_state.db, new_row], ignore_index=True)
         st.rerun()
 
-# --- MAIN TABS ---
-mesi = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre", "ANNUALE", "CONFIG"]
-tabs = st.tabs(mesi)
+# --- INTERFACCIA TABS ---
+mesi_nomi = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre", "ANNUALE", "CONFIG"]
+tabs = st.tabs(mesi_nomi)
 
 saldi_attuali = calcola_saldi()
 
-for i, nome_mese in enumerate(mesi):
+for i, nome in enumerate(mesi_nomi):
     with tabs[i]:
-        if nome_mese == "CONFIG":
-            st.header("⚙️ Configurazione Saldi Iniziali")
+        if nome == "CONFIG":
+            st.header("⚙️ Saldi Iniziali al 1° Gennaio")
             cols = st.columns(3)
             for idx, m in enumerate(st.session_state.saldi_iniziali):
-                st.session_state.saldi_iniziali[m] = cols[idx%3].number_input(f"Saldo {m}", value=float(st.session_state.saldi_iniziali[m]), key=f"init_{m}")
+                st.session_state.saldi_iniziali[m] = cols[idx%3].number_input(f"Saldo iniziale {m}", value=float(st.session_state.saldi_iniziali[m]))
 
-        elif nome_mese == "ANNUALE":
-            st.header("📈 Analisi Annuale")
+        elif nome == "ANNUALE":
+            st.header("📈 Analisi Annuale Totale")
             df_a = st.session_state.db
             if not df_a.empty:
-                c1, c2 = st.columns(2)
-                fig_bar = px.bar(df_a[df_a["Tipo"].isin(["Uscite", "Entrate"])], x="Mese_Num", y="Importo", color="Tipo", title="Trend Mensile", barmode="group", color_discrete_map={"Uscite":"#EF553B", "Entrate":"#00CC96"})
-                c1.plotly_chart(fig_bar, use_container_width=True)
-                
-                acc_total = df_a[df_a["Accumulo"] == "Sì"].groupby("Sub")["Importo"].sum().reset_index()
-                c2.subheader("💰 Fondi Accumulo Totali")
-                c2.dataframe(acc_total, use_container_width=True)
-            else: st.info("Inserisci dati per sbloccare l'analisi annuale.")
+                col_g1, col_g2 = st.columns(2)
+                with col_g1:
+                    fig_a = px.bar(df_a[df_a["Tipo"].isin(["Uscite", "Entrate"])], x="Mese_Num", y="Importo", color="Tipo", barmode="group", title="Entrate vs Uscite Annuali")
+                    st.plotly_chart(fig_a, use_container_width=True)
+                with col_g2:
+                    st.subheader("Accumuli Totali")
+                    df_acc = df_a[df_a["Accumulo"] == "Sì"].groupby("Sub")["Importo"].sum().reset_index()
+                    st.dataframe(df_acc, hide_index=True, use_container_width=True)
+            else: st.info("Inserisci dati per visualizzare l'analisi.")
 
         else:
-            # TAB MENSILE
-            st.header(f"📅 Resoconto {nome_mese}")
+            # DASHBOARD MENSILE
+            st.header(f"📅 Riepilogo {nome}")
             
-            # Row 1: Saldi
-            st.subheader("🏦 Saldo attuale strumenti")
+            # Mattonelle Saldi
+            st.subheader("Saldi Correnti")
             cols_m = st.columns(len(saldi_attuali))
             for idx, m in enumerate(saldi_attuali):
-                cols_m[idx].metric(m, f"{saldi_attuali[m]:.2f}€")
+                cols_m[idx].metric(label=m, value=f"{saldi_attuali[m]:.2f} €")
             
             st.divider()
             
             df_m = st.session_state.db[st.session_state.db["Mese_Num"] == (i + 1)]
-            
             if not df_m.empty:
-                col_tab, col_graph = st.columns([1.5, 1])
-                with col_tab:
+                c1, c2 = st.columns([1.5, 1])
+                with c1:
                     st.subheader("Lista Movimenti")
                     st.dataframe(df_m[["Data", "Tipo", "Macro", "Sub", "Importo", "Metodo", "Descrizione"]], use_container_width=True, hide_index=True)
-                
-                with col_graph:
-                    st.subheader("Distribuzione Uscite")
+                with c2:
+                    st.subheader("Ripartizione Spese")
                     df_u = df_m[df_m["Tipo"] == "Uscite"]
                     if not df_u.empty:
-                        fig_pie = px.pie(df_u, values='Importo', names='Macro', hole=0.5, color_discrete_sequence=px.colors.qualitative.Pastel)
-                        st.plotly_chart(fig_pie, use_container_width=True)
-                    else: st.write("Nessuna uscita registrata.")
-            else: st.info("Nessun dato per questo mese.")
+                        fig_p = px.pie(df_u, values='Importo', names='Macro', hole=0.4)
+                        st.plotly_chart(fig_p, use_container_width=True)
+                    else: st.info("Nessuna uscita registrata.")
+            else: st.info("Ancora nessun dato per questo mese.")
